@@ -1,0 +1,69 @@
+{
+  "name": "dsh-pet-lan",
+  "version": "0.2.1",
+  "description": "LAN co-op for the dsh-pet desktop pet: every DSH on the same network shows the other users' pets. Requires dsh-pet 0.3.7.",
+  "type": "module",
+  "main": "lib/index.js",
+  "icon": "icon.svg",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/index.js",
+    "client.js",
+    "runtime/desktop-helper",
+    "scripts/install.mjs",
+    "scripts/patch-dsh-pet.mjs",
+    "AI-INSTALL.md",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    },
+    "engines": {
+      "dsh": ">=0.2.1-rc.2"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.1-rc.2": "compatible"
+      }
+    }
+  },
+  "license": "MIT",
+  "author": "dsh-pet-lan contributors",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "desktop-pet",
+    "lan",
+    "multiplayer",
+    "bongo-cat"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hamster1214/dsh-pet-lan.git"
+  },
+  "homepage": "https://github.com/Hamster1214/dsh-pet-lan#readme",
+  "bugs": {
+    "url": "https://github.com/Hamster1214/dsh-pet-lan/issues"
+  }
+}

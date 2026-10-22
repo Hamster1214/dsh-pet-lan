@@ -1,0 +1,8 @@
+# dsh-pet-lan bundle patch: one row that mounts both halves.
+#   - Host half: LAN presence service (UDP broadcast) + /api/pet-lan JSON routes.
+#   - Browser half: remote-pet overlay in `shell.overlay` + a settings page.
+# The row id is package-specific and unique, so it never collides with the
+# pet's own `pet` row inserted by @linxin666/dsh-pet.
+- insert:
+    - id: dsh-pet-lan
+      name: 'dsh-pet-lan'

@@ -1,0 +1,5 @@
+node_modules/
+*.zip
+*.bak
+shots/
+.dsh-pet-lan.status.json

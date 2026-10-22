@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dsh-pet-lan</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="pet" class="pet" role="button" aria-label="远端桌宠">
+      <div id="bubble" class="bubble">
+        <img id="bubble-image" class="bubble-image" alt="" draggable="false" />
+        <span id="bubble-text" class="bubble-text"></span>
+      </div>
+      <div id="tag" class="tag">
+        <span class="dot"></span>
+        <span id="tag-name" class="tag-name"></span>
+      </div>
+      <div id="stage" class="stage">
+        <video id="v0" class="video" muted autoplay playsinline></video>
+        <video id="v1" class="video" muted autoplay playsinline></video>
+        <div id="fallback" class="fallback">🐾</div>
+      </div>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>
