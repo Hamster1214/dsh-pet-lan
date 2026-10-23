@@ -217,7 +217,12 @@ function startStdin() {  // Electron's main process cannot read a piped stdin on
 /** Persist a settled window position to the Host. */
 function persistMove(entry) {
   if (entry.win.isDestroyed()) return
-  const bounds = entry.win.getBounds()
+  let bounds
+  try {
+    bounds = entry.win.getBounds()
+  } catch {
+    return
+  }
   const movesFile = globalThis.__petLanMovesFile
   if (typeof movesFile === 'string' && movesFile !== '') {
     try {
@@ -240,7 +245,12 @@ function startThrow(entry, vx, vy) {
     persistMove(entry)
     return
   }
-  const bounds = entry.win.getBounds()
+  let bounds
+  try {
+    bounds = entry.win.getBounds()
+  } catch {
+    return
+  }
   const area = screen.getDisplayMatching(bounds).workArea
   entry.physics = {    x: bounds.x,
     y: bounds.y,
@@ -334,7 +344,11 @@ ipcMain.on('pet-lan-drag-move', (event, payload) => {
   if (entry === undefined || entry.win.isDestroyed() || entry.drag.active !== true || payload === null || typeof payload !== 'object') return
   const dx = Math.round((Number(payload.screenX) || 0) - entry.drag.startX)
   const dy = Math.round((Number(payload.screenY) || 0) - entry.drag.startY)
-  entry.win.setPosition(entry.drag.x + dx, entry.drag.y + dy)
+  try {
+    entry.win.setPosition(entry.drag.x + dx, entry.drag.y + dy)
+  } catch {
+    entry.drag.active = false
+  }
 })
 
 ipcMain.on('pet-lan-drag-end', (event, payload) => {
@@ -357,7 +371,11 @@ ipcMain.on('pet-lan-drag-cancel', (event) => {
   entry.drag.active = false
   stopThrow(entry)
   if (wasActive && Number.isFinite(entry.drag.x) && Number.isFinite(entry.drag.y)) {
-    entry.win.setPosition(entry.drag.x, entry.drag.y)
+    try {
+      entry.win.setPosition(entry.drag.x, entry.drag.y)
+    } catch {
+      // The window vanished between the guard and the move.
+    }
   }
 })
 
