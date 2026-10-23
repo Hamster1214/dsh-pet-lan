@@ -13,6 +13,7 @@ The LAN protocol is **plaintext and unauthenticated**:
 - The room name is a filter, **not a password**. Anyone on the same LAN who knows the room name and UDP port can announce a pet, spoof another pet's name, send waves, or read broadcast data.
 - Presence includes pet names, hostname, viewport and positions. If **Broadcast bubble text** is enabled it also includes the pet's bubble text (which can contain snippets of a conversation) and meme names.
 - Incoming waves are rate-limited per sender and globally, and can be disabled with **Accept waves**.
+- Squish notifications are a separate `poke` datagram containing only the sender's pet name/host and the clicked pet id. They are rate-limited per sender and globally; the text is a fixed template (`XX squished you`). Collision impulses are **never** sent over the LAN; collisions are rendered locally only.
 - Use this plugin only on a trusted private LAN. Do not enable it on public Wi-Fi.
 
 No encryption, signing or per-peer authentication is implemented. If you need those properties, do not use this plugin on an untrusted network.
@@ -43,6 +44,8 @@ The core LAN features (discovery, names, positions, waves, desktop windows, brow
 - In desktop mode, spawns an Electron helper from `$DSH_HOME/electron` (installed by dsh-pet's desktop mode) and creates transparent, always-on-top windows.
 - Starts a loopback-only HTTP API under `/api/pet-lan`; requests from non-loopback sockets are rejected, and Host/Origin/Sec-Fetch-Site are checked.
 - Reads local dsh-pet assets for animations/memes; peer-supplied names are bounded and resolved only inside known asset directories.
+- With **Pet collision** enabled, polls dsh-pet's public `GET /dsh-pet-7340/pose?pet=<id>` (local, desktop pets only) and, when a remote pet hits a local pet, calls the public `POST /dsh-pet-7340/throw?pet=<id>` with a bounded angle/power. This only moves the local pet through dsh-pet's own physics; it does not write dsh-pet files.
+- Serves the two bundled duck clips (`assets/duck-press.mp3`, `duck-release.mp3`, from dsh-whale-widget, MIT) on the same loopback API. No external audio URL or telemetry.
 
 ## Defenses in place
 

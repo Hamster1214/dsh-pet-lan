@@ -32,6 +32,19 @@ window.__ModuleLoader__.load({
     const PET_BASE = '/dsh-pet-7340'
     const PET_CONFIG_URL = PET_BASE + '/config'
 
+    /** Exact duck sound from dsh-whale-widget (Ya1 = press, Ya2 = release). */
+    const DUCK_PRESS_URL = '/api/pet-lan/audio/duck-press.mp3'
+    const DUCK_RELEASE_URL = '/api/pet-lan/audio/duck-release.mp3'
+
+    /** Fallback physics mirrors dsh-pet's defaults; the host sends the local config. */
+    const DEFAULT_PHYSICS = {
+      gravity: 1400,
+      restitution: 0.78,
+      groundFriction: 2.5,
+      ceilingBounce: true,
+      throwPower: 1,
+    }
+
     /** Corner whitelist of dsh-pet's position config. */
     const CORNERS = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
 
@@ -59,6 +72,8 @@ window.__ModuleLoader__.load({
       shareBubblesHint: '同一局域网的人能看到桌宠气泡里的文字（可能包含对话内容）；关闭后只同步动作、表情和位置。',
       acceptWaves: '接受打招呼',
       acceptWavesHint: '允许别人让你的桌宠说一句短问候并播放打招呼动作。',
+      petCollision: '桌宠碰撞',
+      petCollisionHint: '桌面窗口：远端桌宠之间、以及和本机 dsh-pet 之间会互相弹开；关闭后只保留抛掷/反弹。',
       save: '保存',
       saved: '已保存，联机立即生效。',
       saveFailed: '保存失败',
@@ -76,6 +91,9 @@ window.__ModuleLoader__.load({
       waveIn: '来自 {name} 的问候',
       waveInHost: '来自 {name}（{host}）的问候',
       squashHint: '点击挤压并吱一声；拖动可以抛掷',
+      pokeIn: '{name} 捏了你一下',
+      pokeText: '{name} 捏了你一下',
+      pokeSent: '你捏了 {name} 一下',
       lastSeen: '{n} 秒前在线',
       sent: '已发 {n} 个包',
       received: '已收 {n} 个包',
@@ -111,6 +129,8 @@ window.__ModuleLoader__.load({
       shareBubblesHint: 'Peers on the LAN can read your pet bubble text (it may contain conversation snippets). Off = sync only animation, meme and position.',
       acceptWaves: 'Accept waves',
       acceptWavesHint: 'Let peers make your pet say a short greeting and play the wave animation.',
+      petCollision: 'Pet collision',
+      petCollisionHint: 'Desktop windows: remote pets bounce off each other and off your local dsh-pet. Off = throws/bounces only.',
       save: 'Save',
       saved: 'Saved — LAN is live.',
       saveFailed: 'Save failed',
@@ -128,6 +148,9 @@ window.__ModuleLoader__.load({
       waveIn: 'Wave from {name}',
       waveInHost: 'Wave from {name} ({host})',
       squashHint: 'Click to squeak; drag to throw',
+      pokeIn: '{name} squished you',
+      pokeText: '{name} squished you',
+      pokeSent: 'You squished {name}',
       lastSeen: 'seen {n}s ago',
       sent: '{n} packets sent',
       received: '{n} packets received',
@@ -163,56 +186,75 @@ window.__ModuleLoader__.load({
       return list.length === 0 ? undefined : list[Math.floor(Math.random() * list.length)]
     }
 
-    /** Lazily-created WebAudio context for the rubber-duck squeak. */
+    /** Lazily-created WebAudio context for the rubber-duck sound. */
     let duckAudio = null
+    let duckLoad = null
 
-    /** Synthesize a short rubber-duck squeak; no audio asset/license needed. */
-    function playDuck() {
+    function duckContext() {
+      const Ctor = window.AudioContext || window.webkitAudioContext
+      if (Ctor === undefined) return null
+      if (duckAudio === null) duckAudio = new Ctor()
+      return duckAudio
+    }
+
+    /** Fetch and decode the two whale-widget duck clips (once). */
+    function loadDuck() {
+      if (duckLoad !== null) return duckLoad
+      duckLoad = Promise.all([
+        fetch(DUCK_PRESS_URL, { credentials: 'same-origin', cache: 'force-cache' }).then((r) => {
+          if (!r.ok) throw new Error('duck-press HTTP ' + r.status)
+          return r.arrayBuffer()
+        }),
+        fetch(DUCK_RELEASE_URL, { credentials: 'same-origin', cache: 'force-cache' }).then((r) => {
+          if (!r.ok) throw new Error('duck-release HTTP ' + r.status)
+          return r.arrayBuffer()
+        }),
+      ]).then(async ([press, release]) => {
+        const ctx = duckContext()
+        if (ctx === null) throw new Error('no-audio-context')
+        return [await ctx.decodeAudioData(press), await ctx.decodeAudioData(release)]
+      })
+      return duckLoad
+    }
+
+    function playBuffer(ctx, buffer) {
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      const gain = ctx.createGain()
+      gain.gain.value = 0.75
+      source.connect(gain)
+      gain.connect(ctx.destination)
+      source.start()
+    }
+
+    /** Play the exact dsh-whale-widget duck press + release clips. */
+    function playDuckClip(index) {
       try {
-        const Ctor = window.AudioContext || window.webkitAudioContext
-        if (Ctor === undefined) return
-        if (duckAudio === null) duckAudio = new Ctor()
-        const ctx = duckAudio
+        const ctx = duckContext()
+        if (ctx === null) return
         if (ctx.state === 'suspended') void ctx.resume()
-        const now = ctx.currentTime + 0.005
-
-        const out = ctx.createGain()
-        out.gain.setValueAtTime(0.0001, now)
-        out.gain.linearRampToValueAtTime(0.2, now + 0.01)
-        out.gain.exponentialRampToValueAtTime(0.0001, now + 0.22)
-        out.connect(ctx.destination)
-
-        const filter = ctx.createBiquadFilter()
-        filter.type = 'bandpass'
-        filter.frequency.setValueAtTime(1150, now)
-        filter.frequency.exponentialRampToValueAtTime(1750, now + 0.06)
-        filter.Q.value = 1.2
-        filter.connect(out)
-
-        const osc = ctx.createOscillator()
-        osc.type = 'sawtooth'
-        osc.frequency.setValueAtTime(620, now)
-        osc.frequency.exponentialRampToValueAtTime(980, now + 0.055)
-        osc.frequency.exponentialRampToValueAtTime(430, now + 0.21)
-        osc.connect(filter)
-        osc.start(now)
-        osc.stop(now + 0.23)
-
-        const body = ctx.createOscillator()
-        body.type = 'square'
-        body.frequency.setValueAtTime(240, now)
-        body.frequency.exponentialRampToValueAtTime(150, now + 0.18)
-        const bodyGain = ctx.createGain()
-        bodyGain.gain.setValueAtTime(0.05, now)
-        bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19)
-        body.connect(bodyGain)
-        bodyGain.connect(ctx.destination)
-        body.start(now)
-        body.stop(now + 0.2)
+        loadDuck().then((clips) => {
+          const buffer = clips[index]
+          if (buffer !== undefined) playBuffer(ctx, buffer)
+        }).catch(() => {
+          // Missing audio route/unsupported codec: interaction still works.
+        })
       } catch {
         // Audio may be unavailable/blocked; interaction still works.
       }
     }
+
+    /** Ya1: one press clip at pointer/key down. */
+    function playDuckPress() {
+      playDuckClip(0)
+    }
+
+    /** Ya2: one release clip at pointer/key up. */
+    function playDuckRelease() {
+      playDuckClip(1)
+    }
+
+    void loadDuck().catch(() => {})
 
     /** Replay the squash animation on an element. */
     function squashElement(element) {
@@ -384,7 +426,10 @@ window.__ModuleLoader__.load({
       let state = { data: null, error: null }
       const listeners = new Set()
       let timer = null
+      let poseTimer = null
       let inflight = false
+      let lastLocalHitSeq = 0
+      let localHitInitialized = false
 
       const publish = (next) => {
         state = next
@@ -399,10 +444,78 @@ window.__ModuleLoader__.load({
         // by the dsh-pet live-state patch (desktop-mode pets have no DOM here;
         // their state reaches the host through the helper's state file).
         const live = readBrowserLive(pets)
-        void postJson('/api/pet-lan/local', {
+        const result = await postJson('/api/pet-lan/local', {
           pets: pets.map((pet) => (live[pet.id] === undefined ? pet : { ...pet, live: live[pet.id] })),
           viewport: { w: window.innerWidth, h: window.innerHeight },
+          physics: merged.physics,
         })
+        applyLocalHits(result.localHits)
+      }
+
+      const throwLocal = (hit) => {
+        const petId = typeof hit.petId === 'string' ? hit.petId : ''
+        const vx = Number(hit.vx)
+        const vy = Number(hit.vy)
+        if (petId === '' || !Number.isFinite(vx) || !Number.isFinite(vy)) return
+        const speed = Math.hypot(vx, vy)
+        if (speed < 20) return
+        const physics = localConfig !== null && localConfig.physics !== undefined ? localConfig.physics : null
+        const throwPower = physics !== null && Number.isFinite(Number(physics.throwPower)) ? Number(physics.throwPower) : 1
+        const power = clamp(speed / (1200 * Math.max(0.1, throwPower)), 0.05, 4)
+        const angle = Math.atan2(-vy, vx) * 180 / Math.PI
+        void postJson(PET_BASE + '/throw?pet=' + encodeURIComponent(petId), { angle, power })
+      }
+
+      const applyLocalHits = (hits) => {
+        if (!Array.isArray(hits)) return
+        if (!localHitInitialized) {
+          localHitInitialized = true
+          for (const hit of hits) {
+            const seq = Number(hit.seq)
+            if (Number.isFinite(seq) && seq > lastLocalHitSeq) lastLocalHitSeq = seq
+          }
+          return
+        }
+        for (const hit of hits) {
+          const seq = Number(hit.seq)
+          if (!Number.isFinite(seq) || seq <= lastLocalHitSeq) continue
+          lastLocalHitSeq = seq
+          throwLocal(hit)
+        }
+      }
+
+      /** Poll dsh-pet's /pose for the local desktop pet body (collision). */
+      const reportPoses = async () => {
+        if (localConfig === null) return
+        const merged = localConfig
+        const { pets } = flattenPets(merged)
+        if (pets.length === 0) return
+        const bodies = []
+        for (const pet of pets.slice(0, 5)) {
+          try {
+            const response = await fetch(PET_BASE + '/pose?pet=' + encodeURIComponent(pet.id), {
+              credentials: 'same-origin',
+              cache: 'no-store',
+            })
+            if (!response.ok) continue
+            const pose = await response.json()
+            if (pose === null || pose.ok !== true) continue
+            const nx = Number(pose.x)
+            const ny = Number(pose.y)
+            if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx < 0 || nx > 1 || ny < 0 || ny > 1) continue
+            // Normalized center: the desktop helper maps it against the real
+            // multi-monitor work-area hull (the browser only knows one screen).
+            bodies.push({ id: pet.id, size: pet.size, nx, ny })
+          } catch {
+            // The local pet may not be in desktop mode; collision is optional.
+          }
+        }
+        const result = await postJson('/api/pet-lan/local', {
+          bodies,
+          physics: merged.physics,
+          viewport: { w: window.innerWidth, h: window.innerHeight },
+        })
+        applyLocalHits(result.localHits)
       }
 
       const tick = async () => {
@@ -418,6 +531,7 @@ window.__ModuleLoader__.load({
           if (!response.ok) throw new Error('HTTP ' + response.status)
           const data = await response.json()
           publish({ data, error: null })
+          applyLocalHits(data.localHits)
         } catch (error) {
           publish({ data: state.data, error: String(error && error.message ? error.message : error) })
           // The pet config may be missing before dsh-pet mounts; keep retrying.
@@ -428,22 +542,31 @@ window.__ModuleLoader__.load({
       }
 
       const onVisibility = () => {
-        if (document.visibilityState === 'visible') void tick()
+        if (document.visibilityState === 'visible') {
+          void tick()
+          void reportPoses()
+        }
       }
 
       const start = () => {
         if (timer !== null) return
         void tick()
+        void reportPoses()
         timer = window.setInterval(() => {
           if (document.visibilityState === 'visible') void tick()
         }, 2000)
+        poseTimer = window.setInterval(() => {
+          if (document.visibilityState === 'visible') void reportPoses()
+        }, 500)
         document.addEventListener('visibilitychange', onVisibility)
       }
 
       const stop = () => {
         if (timer === null) return
         window.clearInterval(timer)
+        window.clearInterval(poseTimer)
         timer = null
+        poseTimer = null
         document.removeEventListener('visibilitychange', onVisibility)
       }
 
@@ -462,6 +585,9 @@ window.__ModuleLoader__.load({
         refresh: tick,
         wave(node) {
           return postJson('/api/pet-lan/wave', { node })
+        },
+        poke(node, petId) {
+          return postJson('/api/pet-lan/poke', { node, petId })
         },
         save(config) {
           return postJson('/api/pet-lan/config', config)
@@ -560,7 +686,7 @@ window.__ModuleLoader__.load({
 
     /** One peering pet: position, animation, name tag and wave gesture. */
     function RemotePet(props) {
-      const { peer, pet, entry, factor, viewport, onWave, t } = props
+      const { peer, pet, entry, factor, viewport, onWave, onPoke, t, physics } = props
       const [windowWidth, windowHeight] = viewport
       const size = clamp(Math.round(pet.size * factor), 80, 260)
       const height = Math.round(size * 9 / 16)
@@ -662,12 +788,18 @@ window.__ModuleLoader__.load({
       /** Throw the pet from `pos` with a screen-pixel velocity; bounce on edges. */
       const startThrow = (pos, vx, vy) => {
         cancelThrow()
+        const model = physics ?? DEFAULT_PHYSICS
+        const gravity = Number.isFinite(Number(model.gravity)) ? Number(model.gravity) : DEFAULT_PHYSICS.gravity
+        const restitution = Number.isFinite(Number(model.restitution)) ? Number(model.restitution) : DEFAULT_PHYSICS.restitution
+        const groundFriction = Number.isFinite(Number(model.groundFriction)) ? Number(model.groundFriction) : DEFAULT_PHYSICS.groundFriction
+        const ceilingBounce = model.ceilingBounce !== false
+        const throwPower = Number.isFinite(Number(model.throwPower)) ? Number(model.throwPower) : DEFAULT_PHYSICS.throwPower
         const maxX = Math.max(0, windowWidth - size)
         const maxY = Math.max(0, windowHeight - height)
         let x = clamp(pos.x, 0, maxX)
         let y = clamp(pos.y, 0, maxY)
-        let vx2 = clamp(vx, -2600, 2600)
-        let vy2 = clamp(vy, -2600, 2600)
+        let vx2 = clamp(vx * throwPower, -2600, 2600)
+        let vy2 = clamp(vy * throwPower, -2600, 2600)
         if (Math.hypot(vx2, vy2) < 80) {
           posRef.current = { x, y }
           setDragPos({ x, y })
@@ -677,29 +809,30 @@ window.__ModuleLoader__.load({
         const tick = (frameTime) => {
           const dt = Math.min(0.033, Math.max(0.001, (frameTime - last) / 1000))
           last = frameTime
-          vy2 += 2200 * dt
+          vy2 += gravity * dt
           x += vx2 * dt
           y += vy2 * dt
           if (x < 0) {
             x = 0
-            vx2 = Math.abs(vx2) * 0.55
+            vx2 = Math.abs(vx2) * restitution
           } else if (x > maxX) {
             x = maxX
-            vx2 = -Math.abs(vx2) * 0.55
+            vx2 = -Math.abs(vx2) * restitution
           }
           if (y < 0) {
-            y = 0
-            vy2 = Math.abs(vy2) * 0.55
-          } else if (y > maxY) {
+            if (ceilingBounce) {
+              y = 0
+              vy2 = Math.abs(vy2) * restitution
+            }
+          } else if (y >= maxY) {
             y = maxY
-            vy2 = -Math.abs(vy2) * 0.55
+            vx2 *= Math.max(0, 1 - groundFriction * dt)
+            if (Math.abs(vy2) < 40) vy2 = 0
+            else vy2 = -Math.abs(vy2) * restitution
           }
-          vx2 *= 0.995
-          vy2 *= 0.995
-          if (y >= maxY - 0.5) vx2 *= 0.92
           posRef.current = { x, y }
           setDragPos({ x, y })
-          if (y >= maxY - 0.5 && Math.abs(vy2) < 20 && Math.abs(vx2) < 40) {
+          if (y >= maxY - 1 && Math.abs(vy2) < 1 && Math.abs(vx2) < 15) {
             throwRef.current = 0
             return
           }
@@ -712,6 +845,7 @@ window.__ModuleLoader__.load({
         if (event.button !== 0) return
         event.preventDefault()
         cancelThrow()
+        playDuckPress()
         const rect = event.currentTarget.getBoundingClientRect()
         dragRef.current = {
           pointerId: event.pointerId,
@@ -751,6 +885,7 @@ window.__ModuleLoader__.load({
         const drag = dragRef.current
         if (drag === null || drag.pointerId !== event.pointerId) return
         dragRef.current = null
+        playDuckRelease()
         try {
           event.currentTarget.releasePointerCapture(event.pointerId)
         } catch {
@@ -761,7 +896,7 @@ window.__ModuleLoader__.load({
         const current = posRef.current ?? { x: drag.originX, y: drag.originY }
         if (!drag.moved) {
           squashElement(boxRef.current)
-          playDuck()
+          onPoke(peer, pet)
           posRef.current = current
           setDragPos(current)
           return
@@ -779,6 +914,7 @@ window.__ModuleLoader__.load({
         const drag = dragRef.current
         if (drag === null || drag.pointerId !== event.pointerId) return
         dragRef.current = null
+        playDuckRelease()
         setDragPos(null)
       }
 
@@ -796,8 +932,16 @@ window.__ModuleLoader__.load({
         onKeyDown: (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
+            if (event.repeat) return
             squashElement(boxRef.current)
-            playDuck()
+            playDuckPress()
+            onPoke(peer, pet)
+          }
+        },
+        onKeyUp: (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            playDuckRelease()
           }
         },
       }, [
@@ -822,6 +966,9 @@ window.__ModuleLoader__.load({
               onWave(peer, pet)
             },
             onKeyDown: (event) => {
+              if (event.key === 'Enter' || event.key === ' ') event.stopPropagation()
+            },
+            onKeyUp: (event) => {
               if (event.key === 'Enter' || event.key === ' ') event.stopPropagation()
             },
           }, '👋'),
@@ -878,6 +1025,8 @@ window.__ModuleLoader__.load({
       const timers = useRef(new Set())
       const waveSeq = useRef(-1)
       const initializedWave = useRef(false)
+      const pokeSeq = useRef(-1)
+      const initializedPoke = useRef(false)
       const [windowWidth, windowHeight] = viewport
 
       const local = useMemo(() => flattenPets(localConfig), [snapshot.data])
@@ -929,9 +1078,35 @@ window.__ModuleLoader__.load({
         }
       }, [incomingSeq, data, pushToast, t, local])
 
+      // Incoming squish notifications: "XX 捏了你一下". The clicked pet's id
+      // is used when it exists locally; otherwise the first local pet answers.
+      const incomingPokeSeq = data !== null && data.lastPoke !== undefined ? data.lastPoke.seq : 0
+      useEffect(() => {
+        if (!initializedPoke.current) {
+          initializedPoke.current = true
+          pokeSeq.current = incomingPokeSeq
+          return
+        }
+        if (incomingPokeSeq <= pokeSeq.current) return
+        pokeSeq.current = incomingPokeSeq
+        const poke = data !== null && data.lastPoke !== undefined ? data.lastPoke : null
+        if (poke === null) return
+        pushToast(t('pokeIn', { name: poke.fromName }))
+        const target = local.pets.find((pet) => pet.id === poke.petId) ?? local.pets[0]
+        if (target === undefined) return
+        void postJson(PET_BASE + '/broadcast?pet=' + encodeURIComponent(target.id), {
+          text: t('pokeText', { name: poke.fromName }),
+        })
+      }, [incomingPokeSeq, data, pushToast, t, local])
+
       const waveTo = useCallback((peer, pet) => {
         pushToast(t('waveSent', { name: pet.name }))
         void store.wave(peer.node)
+      }, [pushToast, t])
+
+      const pokeTo = useCallback((peer, pet) => {
+        pushToast(t('pokeSent', { name: pet.name }))
+        void store.poke(peer.node, pet.id)
       }, [pushToast, t])
 
       if (data === null || data.enabled !== true) return null
@@ -940,7 +1115,16 @@ window.__ModuleLoader__.load({
       // overlay stays out of the way. If Electron is unavailable or crashed,
       // fall back to the overlay so peers remain visible.
       const mode = data.config !== undefined && data.config.mode !== undefined ? data.config.mode : 'desktop'
-      if (mode === 'desktop' && data.desktopReady === true) return null
+      if (mode === 'desktop' && data.desktopReady === true) {
+        // Keep the toast surface alive in desktop mode: this is where a
+        // squish notification ("XX 捏了你一下") becomes visible.
+        return toasts.length > 0
+          ? h('div', {
+            className: 'dsh-pet-lan-toasts',
+            style: { right: '16px', bottom: '16px' },
+          }, toasts.map((toast) => h('div', { key: toast.id, className: 'dsh-pet-lan-toast' }, toast.text)))
+          : null
+      }
 
       const peers = Array.isArray(data.peers) ? data.peers : []
       const sprites = []
@@ -958,7 +1142,11 @@ window.__ModuleLoader__.load({
             factor,
             viewport,
             onWave: waveTo,
+            onPoke: pokeTo,
             t,
+            physics: data !== null && data.config !== undefined && data.config.physics !== undefined
+              ? data.config.physics
+              : DEFAULT_PHYSICS,
           }))
         }
       }
@@ -1031,6 +1219,7 @@ window.__ModuleLoader__.load({
           mode: data.config.mode !== undefined ? data.config.mode : 'desktop',
           shareBubbles: data.config.shareBubbles !== false,
           acceptWaves: data.config.acceptWaves !== false,
+          petCollision: data.config.petCollision !== false,
         })
       }, [data])
 
@@ -1143,6 +1332,19 @@ window.__ModuleLoader__.load({
             h('span', { key: 'label' }, t('acceptWaves')),
           ]),
           h('span', { key: 'hint', className: 'dsh-pet-lan-muted dsh-pet-lan-small' }, t('acceptWavesHint')),
+        ]),
+        h('div', { key: 'collision', className: 'dsh-pet-lan-field' }, [
+          h('label', { key: 'petCollision', className: 'dsh-pet-lan-check' }, [
+            h('input', {
+              key: 'input',
+              type: 'checkbox',
+              checked: form !== null && form.petCollision === true,
+              disabled: form === null,
+              onChange: (event) => setForm((current) => ({ ...current, petCollision: event.target.checked })),
+            }),
+            h('span', { key: 'label' }, t('petCollision')),
+          ]),
+          h('span', { key: 'hint', className: 'dsh-pet-lan-muted dsh-pet-lan-small' }, t('petCollisionHint')),
         ]),
         h('div', { key: 'actions', className: 'dsh-pet-lan-actions' }, [
           h('button', { key: 'save', type: 'button', className: 'dsh-pet-lan-button dsh-pet-lan-button-primary', onClick: () => void save() }, t('save')),

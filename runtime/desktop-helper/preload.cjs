@@ -21,4 +21,7 @@ contextBridge.exposeInMainWorld('petLan', {
   dragCancel() {
     ipcRenderer.send('pet-lan-drag-cancel')
   },
+  poke(key) {
+    ipcRenderer.send('pet-lan-poke', String(key || ''))
+  },
 })

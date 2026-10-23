@@ -15,52 +15,27 @@ let dragStartX = 0
 let dragStartY = 0
 let dragMoved = false
 let dragSamples = []
+let currentKey = ''
 
-/** Lazily-created WebAudio context for the rubber-duck squeak. */
-let duckAudio = null
+/** Exact duck sound from dsh-whale-widget (Ya1 = press, Ya2 = release). */
+const duckPressUrl = new URL('../../assets/duck-press.mp3', location.href).href
+const duckReleaseUrl = new URL('../../assets/duck-release.mp3', location.href).href
 
-function playDuck() {
+function playDuckPress() {
   try {
-    const Ctor = window.AudioContext || window.webkitAudioContext
-    if (Ctor === undefined) return
-    if (duckAudio === null) duckAudio = new Ctor()
-    const ctx = duckAudio
-    if (ctx.state === 'suspended') void ctx.resume()
-    const now = ctx.currentTime + 0.005
+    const press = new Audio(duckPressUrl)
+    press.volume = 0.75
+    void press.play().catch(() => {})
+  } catch {
+    // Audio may be unavailable; the interaction still works.
+  }
+}
 
-    const out = ctx.createGain()
-    out.gain.setValueAtTime(0.0001, now)
-    out.gain.linearRampToValueAtTime(0.2, now + 0.01)
-    out.gain.exponentialRampToValueAtTime(0.0001, now + 0.22)
-    out.connect(ctx.destination)
-
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'bandpass'
-    filter.frequency.setValueAtTime(1150, now)
-    filter.frequency.exponentialRampToValueAtTime(1750, now + 0.06)
-    filter.Q.value = 1.2
-    filter.connect(out)
-
-    const osc = ctx.createOscillator()
-    osc.type = 'sawtooth'
-    osc.frequency.setValueAtTime(620, now)
-    osc.frequency.exponentialRampToValueAtTime(980, now + 0.055)
-    osc.frequency.exponentialRampToValueAtTime(430, now + 0.21)
-    osc.connect(filter)
-    osc.start(now)
-    osc.stop(now + 0.23)
-
-    const body = ctx.createOscillator()
-    body.type = 'square'
-    body.frequency.setValueAtTime(240, now)
-    body.frequency.exponentialRampToValueAtTime(150, now + 0.18)
-    const bodyGain = ctx.createGain()
-    bodyGain.gain.setValueAtTime(0.05, now)
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19)
-    body.connect(bodyGain)
-    bodyGain.connect(ctx.destination)
-    body.start(now)
-    body.stop(now + 0.2)
+function playDuckRelease() {
+  try {
+    const release = new Audio(duckReleaseUrl)
+    release.volume = 0.75
+    void release.play().catch(() => {})
   } catch {
     // Audio may be unavailable; the interaction still works.
   }
@@ -128,6 +103,7 @@ function applyBubble(state) {
 
 function applyState(state) {
   if (state === null || typeof state !== 'object') return
+  currentKey = typeof state.key === 'string' ? state.key : ''
   applySize(state)
   tagName.textContent = state.name || ''
   applyFacing(state.facing)
@@ -145,6 +121,7 @@ petEl.addEventListener('pointerdown', (event) => {
   event.preventDefault()
   dragging = true
   dragMoved = false
+  playDuckPress()
   dragStartX = event.screenX
   dragStartY = event.screenY
   dragSamples = [{ x: event.screenX, y: event.screenY, t: performance.now() }]
@@ -172,6 +149,7 @@ function endDrag(event, cancelled) {
   if (!dragging) return
   dragging = false
   petEl.classList.remove('dragging')
+  playDuckRelease()
   if (cancelled) {
     window.petLan.dragCancel()
     return
@@ -181,7 +159,7 @@ function endDrag(event, cancelled) {
   dragSamples.push({ x: event.screenX, y: event.screenY, t: now })
   if (!dragMoved) {
     squashPet()
-    playDuck()
+    if (currentKey !== '') window.petLan.poke(currentKey)
     window.petLan.dragCancel()
     return
   }
