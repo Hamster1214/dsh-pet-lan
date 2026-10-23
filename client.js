@@ -75,6 +75,7 @@ window.__ModuleLoader__.load({
       waveSent: '已向 {name} 打招呼',
       waveIn: '来自 {name} 的问候',
       waveInHost: '来自 {name}（{host}）的问候',
+      squashHint: '点击挤压并吱一声；拖动可以抛掷',
       lastSeen: '{n} 秒前在线',
       sent: '已发 {n} 个包',
       received: '已收 {n} 个包',
@@ -126,6 +127,7 @@ window.__ModuleLoader__.load({
       waveSent: 'Waved at {name}',
       waveIn: 'Wave from {name}',
       waveInHost: 'Wave from {name} ({host})',
+      squashHint: 'Click to squeak; drag to throw',
       lastSeen: 'seen {n}s ago',
       sent: '{n} packets sent',
       received: '{n} packets received',
@@ -159,6 +161,65 @@ window.__ModuleLoader__.load({
     /** Pick a random element (empty list -> undefined). */
     function pickRandom(list) {
       return list.length === 0 ? undefined : list[Math.floor(Math.random() * list.length)]
+    }
+
+    /** Lazily-created WebAudio context for the rubber-duck squeak. */
+    let duckAudio = null
+
+    /** Synthesize a short rubber-duck squeak; no audio asset/license needed. */
+    function playDuck() {
+      try {
+        const Ctor = window.AudioContext || window.webkitAudioContext
+        if (Ctor === undefined) return
+        if (duckAudio === null) duckAudio = new Ctor()
+        const ctx = duckAudio
+        if (ctx.state === 'suspended') void ctx.resume()
+        const now = ctx.currentTime + 0.005
+
+        const out = ctx.createGain()
+        out.gain.setValueAtTime(0.0001, now)
+        out.gain.linearRampToValueAtTime(0.2, now + 0.01)
+        out.gain.exponentialRampToValueAtTime(0.0001, now + 0.22)
+        out.connect(ctx.destination)
+
+        const filter = ctx.createBiquadFilter()
+        filter.type = 'bandpass'
+        filter.frequency.setValueAtTime(1150, now)
+        filter.frequency.exponentialRampToValueAtTime(1750, now + 0.06)
+        filter.Q.value = 1.2
+        filter.connect(out)
+
+        const osc = ctx.createOscillator()
+        osc.type = 'sawtooth'
+        osc.frequency.setValueAtTime(620, now)
+        osc.frequency.exponentialRampToValueAtTime(980, now + 0.055)
+        osc.frequency.exponentialRampToValueAtTime(430, now + 0.21)
+        osc.connect(filter)
+        osc.start(now)
+        osc.stop(now + 0.23)
+
+        const body = ctx.createOscillator()
+        body.type = 'square'
+        body.frequency.setValueAtTime(240, now)
+        body.frequency.exponentialRampToValueAtTime(150, now + 0.18)
+        const bodyGain = ctx.createGain()
+        bodyGain.gain.setValueAtTime(0.05, now)
+        bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19)
+        body.connect(bodyGain)
+        bodyGain.connect(ctx.destination)
+        body.start(now)
+        body.stop(now + 0.2)
+      } catch {
+        // Audio may be unavailable/blocked; interaction still works.
+      }
+    }
+
+    /** Replay the squash animation on an element. */
+    function squashElement(element) {
+      if (element === null || element === undefined) return
+      element.classList.remove('is-squash')
+      void element.offsetWidth
+      element.classList.add('is-squash')
     }
 
     /** POST JSON and always resolve to a parsed object. */
@@ -514,6 +575,11 @@ window.__ModuleLoader__.load({
       const liveBubble = live !== null && typeof live.bubble === 'string' ? live.bubble : ''
       const liveImage = live !== null && typeof live.image === 'string' ? live.image : ''
       const mirror = live !== null && live.facing === 'right'
+      const [dragPos, setDragPos] = useState(null)
+      const dragRef = useRef(null)
+      const posRef = useRef(null)
+      const throwRef = useRef(0)
+      const boxRef = useRef(null)
 
       // A different pet kind (or a repaired asset) should get another chance.
       useEffect(() => {
@@ -554,8 +620,12 @@ window.__ModuleLoader__.load({
       // never parks its pet outside our viewport.
       const offsetX = clamp(Math.round(pet.marginX * factor), 0, Math.max(0, windowWidth - size))
       const offsetY = clamp(Math.round(pet.marginY * factor), 0, Math.max(0, windowHeight - height))
-      const style = { width: size + 'px' }
-      if (pet.corner === 'bottom-right') {
+      const style = { width: size + 'px', height: height + 'px' }
+      if (dragPos !== null) {
+        style.left = dragPos.x + 'px'
+        style.top = dragPos.y + 'px'
+        style.transition = 'none'
+      } else if (pet.corner === 'bottom-right') {
         style.right = offsetX + 'px'
         style.bottom = offsetY + 'px'
       } else if (pet.corner === 'bottom-left') {
@@ -577,34 +647,184 @@ window.__ModuleLoader__.load({
         : wanted
       const hasArt = entry !== null && entry !== undefined && poolRef.current.length > 0
 
+      useEffect(() => () => {
+        if (throwRef.current !== 0) cancelAnimationFrame(throwRef.current)
+        throwRef.current = 0
+      }, [])
+
+      const cancelThrow = () => {
+        if (throwRef.current !== 0) {
+          cancelAnimationFrame(throwRef.current)
+          throwRef.current = 0
+        }
+      }
+
+      /** Throw the pet from `pos` with a screen-pixel velocity; bounce on edges. */
+      const startThrow = (pos, vx, vy) => {
+        cancelThrow()
+        const maxX = Math.max(0, windowWidth - size)
+        const maxY = Math.max(0, windowHeight - height)
+        let x = clamp(pos.x, 0, maxX)
+        let y = clamp(pos.y, 0, maxY)
+        let vx2 = clamp(vx, -2600, 2600)
+        let vy2 = clamp(vy, -2600, 2600)
+        if (Math.hypot(vx2, vy2) < 80) {
+          posRef.current = { x, y }
+          setDragPos({ x, y })
+          return
+        }
+        let last = performance.now()
+        const tick = (frameTime) => {
+          const dt = Math.min(0.033, Math.max(0.001, (frameTime - last) / 1000))
+          last = frameTime
+          vy2 += 2200 * dt
+          x += vx2 * dt
+          y += vy2 * dt
+          if (x < 0) {
+            x = 0
+            vx2 = Math.abs(vx2) * 0.55
+          } else if (x > maxX) {
+            x = maxX
+            vx2 = -Math.abs(vx2) * 0.55
+          }
+          if (y < 0) {
+            y = 0
+            vy2 = Math.abs(vy2) * 0.55
+          } else if (y > maxY) {
+            y = maxY
+            vy2 = -Math.abs(vy2) * 0.55
+          }
+          vx2 *= 0.995
+          vy2 *= 0.995
+          if (y >= maxY - 0.5) vx2 *= 0.92
+          posRef.current = { x, y }
+          setDragPos({ x, y })
+          if (y >= maxY - 0.5 && Math.abs(vy2) < 20 && Math.abs(vx2) < 40) {
+            throwRef.current = 0
+            return
+          }
+          throwRef.current = requestAnimationFrame(tick)
+        }
+        throwRef.current = requestAnimationFrame(tick)
+      }
+
+      const onPointerDown = (event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        cancelThrow()
+        const rect = event.currentTarget.getBoundingClientRect()
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          startT: performance.now(),
+          originX: rect.left,
+          originY: rect.top,
+          moved: false,
+          samples: [{ x: event.clientX, y: event.clientY, t: performance.now() }],
+        }
+        posRef.current = { x: rect.left, y: rect.top }
+        setDragPos({ x: rect.left, y: rect.top })
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        } catch {
+          // Pointer capture is an optimization; window-level events still work.
+        }
+      }
+
+      const onPointerMove = (event) => {
+        const drag = dragRef.current
+        if (drag === null || drag.pointerId !== event.pointerId) return
+        const now = performance.now()
+        const dx = event.clientX - drag.startX
+        const dy = event.clientY - drag.startY
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.moved = true
+        const x = clamp(drag.originX + dx, 0, Math.max(0, windowWidth - size))
+        const y = clamp(drag.originY + dy, 0, Math.max(0, windowHeight - height))
+        posRef.current = { x, y }
+        setDragPos({ x, y })
+        drag.samples.push({ x: event.clientX, y: event.clientY, t: now })
+        if (drag.samples.length > 10) drag.samples.shift()
+      }
+
+      const onPointerUp = (event) => {
+        const drag = dragRef.current
+        if (drag === null || drag.pointerId !== event.pointerId) return
+        dragRef.current = null
+        try {
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        } catch {
+          // Already released.
+        }
+        const now = performance.now()
+        drag.samples.push({ x: event.clientX, y: event.clientY, t: now })
+        const current = posRef.current ?? { x: drag.originX, y: drag.originY }
+        if (!drag.moved) {
+          squashElement(boxRef.current)
+          playDuck()
+          posRef.current = current
+          setDragPos(current)
+          return
+        }
+        const recent = drag.samples.filter((sample) => now - sample.t <= 140)
+        const first = recent[0] ?? drag.samples[0]
+        const last = recent[recent.length - 1] ?? drag.samples[drag.samples.length - 1]
+        const dt = (last.t - first.t) / 1000
+        const vx = dt > 0 ? clamp((last.x - first.x) / dt, -2500, 2500) : 0
+        const vy = dt > 0 ? clamp((last.y - first.y) / dt, -2500, 2500) : 0
+        startThrow(current, vx, vy)
+      }
+
+      const onPointerCancel = (event) => {
+        const drag = dragRef.current
+        if (drag === null || drag.pointerId !== event.pointerId) return
+        dragRef.current = null
+        setDragPos(null)
+      }
+
       return h('div', {
         className: 'dsh-pet-lan-pet',
         style,
         title: pet.name + ' · ' + peer.host,
         role: 'button',
         tabIndex: 0,
-        'aria-label': t('wave') + ': ' + pet.name,
-        onClick: () => {
-          const clicks = entry !== null && entry !== undefined && entry.animations !== null && typeof entry.animations === 'object'
-            ? entry.animations.clicks
-            : undefined
-          const pool = Array.isArray(clicks) && clicks.length > 0 ? clicks : poolRef.current
-          const next = pickRandom(pool)
-          if (next !== undefined) setOverride(next)
-          onWave(peer, pet)
-        },
+        'aria-label': pet.name + ' — ' + t('squashHint'),
+        onPointerDown,
+        onPointerMove,
+        onPointerUp,
+        onPointerCancel,
         onKeyDown: (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
-            const next = pickRandom(poolRef.current)
-            if (next !== undefined) setOverride(next)
-            onWave(peer, pet)
+            squashElement(boxRef.current)
+            playDuck()
           }
         },
       }, [
         h('div', { key: 'tag', className: 'dsh-pet-lan-tag' }, [
           h('span', { key: 'dot', className: 'dsh-pet-lan-dot' }),
           h('span', { key: 'name', className: 'dsh-pet-lan-tag-name' }, pet.name),
+          h('button', {
+            key: 'wave',
+            type: 'button',
+            className: 'dsh-pet-lan-wave',
+            title: t('wave'),
+            'aria-label': t('wave') + ': ' + pet.name,
+            onPointerDown: (event) => event.stopPropagation(),
+            onClick: (event) => {
+              event.stopPropagation()
+              const clicks = entry !== null && entry !== undefined && entry.animations !== null && typeof entry.animations === 'object'
+                ? entry.animations.clicks
+                : undefined
+              const pool = Array.isArray(clicks) && clicks.length > 0 ? clicks : poolRef.current
+              const next = pickRandom(pool)
+              if (next !== undefined) setOverride(next)
+              onWave(peer, pet)
+            },
+            onKeyDown: (event) => {
+              if (event.key === 'Enter' || event.key === ' ') event.stopPropagation()
+            },
+          }, '👋'),
         ]),
         liveBubble !== ''
           ? h('div', { key: 'bubble', className: 'dsh-pet-lan-bubble' }, [
@@ -625,8 +845,12 @@ window.__ModuleLoader__.load({
           : null,
         h('div', {
           key: 'box',
+          ref: boxRef,
           className: 'dsh-pet-lan-box',
           style: { width: size + 'px', height: height + 'px' },
+          onAnimationEnd: (event) => {
+            if (event.animationName === 'dsh-pet-lan-squash') event.currentTarget.classList.remove('is-squash')
+          },
         }, hasArt && !missing
           ? h(RemoteClip, {
             assetRoot: pet.assetRoot,
@@ -985,7 +1209,7 @@ window.__ModuleLoader__.load({
       'background:var(--dsw-alias-bg-overlay,rgba(15,23,42,.86));border:1px solid var(--dsw-alias-border-l1,rgba(148,163,184,.35));',
       'color:var(--dsw-alias-label-secondary,#cbd5e1);font-size:11px;line-height:1.6;box-shadow:0 2px 8px rgba(2,6,23,.28);pointer-events:none;',
       'backdrop-filter:blur(6px)}',
-      '.dsh-pet-lan-tag-name{overflow:hidden;text-overflow:ellipsis}',
+      '.dsh-pet-lan-tag-name{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}',
       '.dsh-pet-lan-bubble{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(100% + 22px);z-index:2;',
       'display:flex;flex-direction:column;align-items:center;gap:4px;max-width:min(240px,70vw);padding:5px 10px;',
       'border-radius:10px;background:rgba(255,255,255,.94);color:#2b2b2b;font-size:12px;line-height:1.45;',
@@ -995,7 +1219,11 @@ window.__ModuleLoader__.load({
       '.dsh-pet-lan-bubble-img{display:block;max-width:120px;max-height:90px;border-radius:6px}',
       '.dsh-pet-lan-bubble-text{white-space:pre-wrap}',
       '.dsh-pet-lan-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-success-primary,#22c55e);flex:0 0 auto;display:inline-block}',
-      '.dsh-pet-lan-box{position:relative;display:flex;align-items:flex-end;justify-content:center;pointer-events:none}',
+      '.dsh-pet-lan-box{position:relative;display:flex;align-items:flex-end;justify-content:center;pointer-events:none;transform-origin:50% 100%}',
+      '.dsh-pet-lan-box.is-squash{animation:dsh-pet-lan-squash .42s cubic-bezier(.22,.8,.3,1)}',
+      '@keyframes dsh-pet-lan-squash{0%{transform:scale(1,1)}18%{transform:scale(1.18,.68)}42%{transform:scale(.92,1.1)}64%{transform:scale(1.06,.96)}82%{transform:scale(.98,1.02)}100%{transform:scale(1,1)}}',
+      '.dsh-pet-lan-wave{pointer-events:auto;flex:0 0 auto;border:0;background:transparent;color:inherit;font:inherit;font-size:12px;line-height:1;padding:0 1px;cursor:pointer;opacity:.9}',
+      '.dsh-pet-lan-wave:hover{opacity:1;transform:scale(1.15)}',
       '.dsh-pet-lan-video{display:block;max-width:none;pointer-events:none;object-fit:contain}',
       '.dsh-pet-lan-avatar{display:flex;align-items:center;justify-content:center;border-radius:50%;pointer-events:none;',
       'background:var(--dsw-alias-bg-layer-2,rgba(30,41,59,.75));border:1px solid var(--dsw-alias-border-l1,rgba(148,163,184,.35));',

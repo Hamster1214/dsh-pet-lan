@@ -1,7 +1,7 @@
 {
   "name": "dsh-pet-lan",
-  "version": "0.3.0",
-  "description": "LAN co-op for the dsh-pet desktop pet: see peers on the same network, wave, and drag their desktop windows. Requires dsh-pet 0.3.7. An optional included patch enables live animation, bubble and meme sync.",
+  "version": "0.4.0",
+  "description": "LAN co-op for the dsh-pet desktop pet: see peers, click to squeak, throw them around with bounce, and drag their desktop windows. Requires dsh-pet 0.3.7. An optional included patch enables live animation, bubble and meme sync.",
   "type": "module",
   "main": "lib/index.js",
   "icon": "icon.svg",

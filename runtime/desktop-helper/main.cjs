@@ -31,6 +31,13 @@ const MARGIN_BOTTOM = 28
 const MIN_SIZE = 80
 const MAX_SIZE = 320
 
+/** Throw physics: gravity, edge restitution and slow-down. */
+const GRAVITY = 2200
+const RESTITUTION = 0.55
+const FRICTION = 0.995
+const THROW_STOP_VX = 40
+const THROW_STOP_VY = 25
+
 /** key -> { win, size, height, pet, ignoring, drag } */
 const windows = new Map()
 
@@ -168,8 +175,7 @@ function applyPets(list) {
   if (entries.length === 0) write({ type: 'empty' })
 }
 
-function startStdin() {
-  // Electron's main process cannot read a piped stdin on Windows
+function startStdin() {  // Electron's main process cannot read a piped stdin on Windows
   // (electron#4218), so the Host publishes state through files instead.
   const stateFile = process.env.DSH_PET_LAN_STATE || ''
   const movesFile = process.env.DSH_PET_LAN_MOVES || ''
@@ -208,6 +214,97 @@ function startStdin() {
   globalThis.__petLanMovesFile = movesFile
 }
 
+/** Persist a settled window position to the Host. */
+function persistMove(entry) {
+  if (entry.win.isDestroyed()) return
+  const bounds = entry.win.getBounds()
+  const movesFile = globalThis.__petLanMovesFile
+  if (typeof movesFile === 'string' && movesFile !== '') {
+    try {
+      fs.appendFileSync(movesFile, JSON.stringify({ key: entry.key, x: bounds.x, y: bounds.y, at: Date.now() }) + '\n')
+    } catch {
+      // Host may have moved the file; stdout remains a fallback.
+    }
+  }
+  write({ type: 'moved', key: entry.key, x: bounds.x, y: bounds.y })
+}
+
+function stopThrow(entry) {
+  entry.physics = undefined
+}
+
+function startThrow(entry, vx, vy) {
+  stopThrow(entry)
+  if (entry.win.isDestroyed()) return
+  if (!Number.isFinite(vx) || !Number.isFinite(vy) || Math.hypot(vx, vy) < 60) {
+    persistMove(entry)
+    return
+  }
+  const bounds = entry.win.getBounds()
+  const area = screen.getDisplayMatching(bounds).workArea
+  entry.physics = {    x: bounds.x,
+    y: bounds.y,
+    vx: Math.max(-2600, Math.min(2600, vx)),
+    vy: Math.max(-2600, Math.min(2600, vy)),
+    width: bounds.width,
+    height: bounds.height,
+    area,
+    last: Date.now(),
+  }
+}
+
+/** One shared 60 Hz tick for every window currently in flight. */
+function tickThrows() {
+  const now = Date.now()
+  for (const entry of windows.values()) {
+    const body = entry.physics
+    if (body === undefined) continue
+    if (entry.win.isDestroyed()) {
+      entry.physics = undefined
+      continue
+    }
+    const dt = Math.min(0.05, Math.max(0.001, (now - body.last) / 1000))
+    body.last = now
+    body.vy += GRAVITY * dt
+    body.x += body.vx * dt
+    body.y += body.vy * dt
+
+    const minX = body.area.x
+    const maxX = Math.max(minX, body.area.x + body.area.width - body.width)
+    const minY = body.area.y
+    const maxY = Math.max(minY, body.area.y + body.area.height - body.height)
+    if (body.x < minX) {
+      body.x = minX
+      body.vx = Math.abs(body.vx) * RESTITUTION
+    } else if (body.x > maxX) {
+      body.x = maxX
+      body.vx = -Math.abs(body.vx) * RESTITUTION
+    }
+    if (body.y < minY) {
+      body.y = minY
+      body.vy = Math.abs(body.vy) * RESTITUTION
+    } else if (body.y > maxY) {
+      body.y = maxY
+      body.vy = -Math.abs(body.vy) * RESTITUTION
+    }
+    body.vx *= FRICTION
+    body.vy *= FRICTION
+    const onFloor = body.y >= maxY - 0.5
+    if (onFloor) body.vx *= 0.92
+    try {
+      entry.win.setPosition(Math.round(body.x), Math.round(body.y))
+    } catch {
+      entry.physics = undefined
+      continue
+    }
+
+    if (onFloor && Math.abs(body.vy) < THROW_STOP_VY && Math.abs(body.vx) < THROW_STOP_VX) {
+      entry.physics = undefined
+      persistMove(entry)
+    }
+  }
+}
+
 ipcMain.on('pet-lan-ready', (event) => {
   const entry = findByWebContents(event.sender)
   if (entry !== undefined) sendState(entry)
@@ -215,7 +312,8 @@ ipcMain.on('pet-lan-ready', (event) => {
 
 ipcMain.on('pet-lan-drag-start', (event, payload) => {
   const entry = findByWebContents(event.sender)
-  if (entry === undefined || payload === null || typeof payload !== 'object') return
+  if (entry === undefined || entry.win.isDestroyed() || payload === null || typeof payload !== 'object') return
+  stopThrow(entry)
   const bounds = entry.win.getBounds()
   entry.drag = {
     active: true,
@@ -233,31 +331,42 @@ ipcMain.on('pet-lan-drag-start', (event, payload) => {
 
 ipcMain.on('pet-lan-drag-move', (event, payload) => {
   const entry = findByWebContents(event.sender)
-  if (entry === undefined || entry.drag.active !== true || payload === null || typeof payload !== 'object') return
+  if (entry === undefined || entry.win.isDestroyed() || entry.drag.active !== true || payload === null || typeof payload !== 'object') return
   const dx = Math.round((Number(payload.screenX) || 0) - entry.drag.startX)
   const dy = Math.round((Number(payload.screenY) || 0) - entry.drag.startY)
   entry.win.setPosition(entry.drag.x + dx, entry.drag.y + dy)
 })
 
-ipcMain.on('pet-lan-drag-end', (event) => {
+ipcMain.on('pet-lan-drag-end', (event, payload) => {
   const entry = findByWebContents(event.sender)
-  if (entry === undefined || entry.drag.active !== true) return
+  if (entry === undefined || entry.win.isDestroyed() || entry.drag.active !== true) return
   entry.drag.active = false
-  const bounds = entry.win.getBounds()
-  const movesFile = globalThis.__petLanMovesFile
-  if (typeof movesFile === 'string' && movesFile !== '') {
-    try {
-      fs.appendFileSync(movesFile, JSON.stringify({ key: entry.key, x: bounds.x, y: bounds.y, at: Date.now() }) + '\n')
-    } catch {
-      // Host may have moved the file; stdout remains a fallback.
-    }
+  const vx = payload !== null && typeof payload === 'object' ? Number(payload.vx) : 0
+  const vy = payload !== null && typeof payload === 'object' ? Number(payload.vy) : 0
+  if (Number.isFinite(vx) && Number.isFinite(vy) && Math.hypot(vx, vy) >= 60) {
+    startThrow(entry, vx, vy)
+  } else {
+    persistMove(entry)
   }
-  write({ type: 'moved', key: entry.key, x: bounds.x, y: bounds.y })
+})
+
+ipcMain.on('pet-lan-drag-cancel', (event) => {
+  const entry = findByWebContents(event.sender)
+  if (entry === undefined || entry.win.isDestroyed()) return
+  const wasActive = entry.drag.active === true
+  entry.drag.active = false
+  stopThrow(entry)
+  if (wasActive && Number.isFinite(entry.drag.x) && Number.isFinite(entry.drag.y)) {
+    entry.win.setPosition(entry.drag.x, entry.drag.y)
+  }
 })
 
 app.whenReady().then(() => {
   startStdin()
   write({ type: 'ready' })
+
+  // Advance every window currently flying/falling after a throw.
+  setInterval(tickThrows, 16).unref?.()
 
   // Hover test: the window stays click-through until the cursor is over the
   // pet body, so transparent pixels never block the desktop underneath.

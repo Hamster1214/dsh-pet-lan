@@ -15,7 +15,10 @@ contextBridge.exposeInMainWorld('petLan', {
   dragMove(screenX, screenY) {
     ipcRenderer.send('pet-lan-drag-move', { screenX, screenY })
   },
-  dragEnd() {
-    ipcRenderer.send('pet-lan-drag-end')
+  dragEnd(payload) {
+    ipcRenderer.send('pet-lan-drag-end', payload || {})
+  },
+  dragCancel() {
+    ipcRenderer.send('pet-lan-drag-cancel')
   },
 })
