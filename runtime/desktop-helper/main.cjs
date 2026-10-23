@@ -27,9 +27,16 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 const MARGIN_SIDE = 28
 const MARGIN_TOP = 210
-const MARGIN_BOTTOM = 28
+const MARGIN_BOTTOM = 0
 const MIN_SIZE = 80
 const MAX_SIZE = 320
+
+/** dsh-pet's body hit box in the 640x360 animation stage. */
+const HIT_BOX = { x0: 200, y0: 50, x1: 440, y1: 335 }
+const STAGE_W = 640
+const STAGE_H = 360
+/** Transparent strip below the feet in the WebM; dsh-pet puts this below the floor. */
+const FEET_PAD_RATIO = (STAGE_H - 330) / STAGE_H
 
 /** Throw physics: defaults mirror dsh-pet, overridden by the local config. */
 const DEFAULT_PHYSICS = {
@@ -143,12 +150,25 @@ function sanitizeLocalBody(raw, hull, now) {
 
 function defaultPosition(index, width, height) {
   const area = screen.getPrimaryDisplay().workArea
-  const x = area.x + area.width - width - 48 - index * 36
-  const y = area.y + area.height - height - 72 - index * 36
+  const size = width - MARGIN_SIDE * 2
+  const bodyHeight = height - MARGIN_TOP - MARGIN_BOTTOM
+  const pad = Math.round(bodyHeight * FEET_PAD_RATIO)
+  const bodyX = area.x + area.width - size - 48 - index * 36
+  const bodyY = area.y + area.height - bodyHeight + pad - 8 - index * 36
   return {
-    x: Math.max(area.x, Math.round(x)),
-    y: Math.max(area.y, Math.round(y)),
+    x: Math.round(bodyX - MARGIN_SIDE),
+    y: Math.round(bodyY - MARGIN_TOP),
   }
+}
+
+/** Body hit rectangle matching dsh-pet's HIT_BOX. */
+function hitRect(entry) {
+  const bounds = entry.win.getBounds()
+  const left = bounds.x + MARGIN_SIDE + (HIT_BOX.x0 / STAGE_W) * entry.size
+  const right = bounds.x + MARGIN_SIDE + (HIT_BOX.x1 / STAGE_W) * entry.size
+  const top = bounds.y + MARGIN_TOP + (HIT_BOX.y0 / STAGE_H) * entry.height
+  const bottom = bounds.y + MARGIN_TOP + (HIT_BOX.y1 / STAGE_H) * entry.height
+  return { left, right, top, bottom }
 }
 
 function findByWebContents(contents) {
@@ -183,9 +203,22 @@ function createWindow(key, pet) {
   const width = size + MARGIN_SIDE * 2
   const totalHeight = height + MARGIN_TOP + MARGIN_BOTTOM
   const hasSaved = Number.isFinite(pet.x) && Number.isFinite(pet.y)
-  const position = hasSaved
+  let position = hasSaved
     ? { x: Math.round(pet.x), y: Math.round(pet.y) }
     : defaultPosition(windows.size, width, totalHeight)
+  if (hasSaved) {
+    // Older versions clamped the window (not the body) to the work area, which
+    // left the pet 28-100 px above the floor. Snap near-floor saved windows.
+    const area = screen.getDisplayMatching({
+      x: position.x,
+      y: position.y,
+      width,
+      height: totalHeight,
+    }).workArea
+    const bodyBottom = position.y + MARGIN_TOP + height
+    const floor = area.y + area.height + Math.round(height * FEET_PAD_RATIO)
+    if (bodyBottom > floor - 40 && bodyBottom < floor + 40) position.y += floor - bodyBottom
+  }
 
   const win = new BrowserWindow({
     x: position.x,
@@ -356,12 +389,12 @@ function startThrow(entry, vx, vy) {
   }
   const area = screen.getDisplayMatching(bounds).workArea
   entry.physics = {
-    x: bounds.x,
-    y: bounds.y,
+    x: bounds.x + MARGIN_SIDE,
+    y: bounds.y + MARGIN_TOP,
     vx: Math.max(-2600, Math.min(2600, vx)),
     vy: Math.max(-2600, Math.min(2600, vy)),
-    width: bounds.width,
-    height: bounds.height,
+    width: entry.size,
+    height: entry.height,
     area,
     last: Date.now(),
   }
@@ -401,8 +434,8 @@ function collideBodies(a, b) {
 function bodyOfEntry(entry) {
   const moving = entry.physics
   const bounds = entry.win.getBounds()
-  const x = (moving === undefined ? bounds.x : moving.x) + MARGIN_SIDE
-  const y = (moving === undefined ? bounds.y : moving.y) + MARGIN_TOP
+  const x = moving === undefined ? bounds.x + MARGIN_SIDE : moving.x
+  const y = moving === undefined ? bounds.y + MARGIN_TOP : moving.y
   return {
     x,
     y,
@@ -435,9 +468,17 @@ function moveEntry(entry, dx, dy) {
   try {
     const bounds = entry.win.getBounds()
     const area = screen.getDisplayMatching(bounds).workArea
-    const x = Math.max(area.x, Math.min(area.x + area.width - bounds.width, bounds.x + Math.round(dx)))
-    const y = Math.max(area.y, Math.min(area.y + area.height - bounds.height, bounds.y + Math.round(dy)))
-    entry.win.setPosition(x, y)
+    const bodyX = (entry.physics === undefined ? bounds.x + MARGIN_SIDE : entry.physics.x) + dx
+    const bodyY = (entry.physics === undefined ? bounds.y + MARGIN_TOP : entry.physics.y) + dy
+    const x = Math.max(area.x, Math.min(area.x + area.width - entry.size, Math.round(bodyX)))
+    const y = Math.max(
+      area.y,
+      Math.min(
+        area.y + area.height + Math.round(entry.height * FEET_PAD_RATIO) - entry.height,
+        Math.round(bodyY),
+      ),
+    )
+    entry.win.setPosition(x - MARGIN_SIDE, y - MARGIN_TOP)
     if (entry.physics !== undefined) {
       entry.physics.x = x
       entry.physics.y = y
@@ -453,12 +494,12 @@ function applyBodyVelocity(entry, vx, vy) {
     const bounds = entry.win.getBounds()
     const area = screen.getDisplayMatching(bounds).workArea
     entry.physics = {
-      x: bounds.x,
-      y: bounds.y,
+      x: bounds.x + MARGIN_SIDE,
+      y: bounds.y + MARGIN_TOP,
       vx,
       vy,
-      width: bounds.width,
-      height: bounds.height,
+      width: entry.size,
+      height: entry.height,
       area,
       last: Date.now(),
     }
@@ -542,7 +583,7 @@ function tickThrows() {
     const minX = body.area.x
     const maxX = Math.max(minX, body.area.x + body.area.width - body.width)
     const minY = body.area.y
-    const maxY = Math.max(minY, body.area.y + body.area.height - body.height)
+    const maxY = Math.max(minY, body.area.y + body.area.height + Math.round(body.height * FEET_PAD_RATIO) - body.height)
     let bounced = false
     if (body.x < minX) {
       body.x = minX
@@ -567,7 +608,7 @@ function tickThrows() {
       bounced = true
     }
     try {
-      entry.win.setPosition(Math.round(body.x), Math.round(body.y))
+      entry.win.setPosition(Math.round(body.x - MARGIN_SIDE), Math.round(body.y - MARGIN_TOP))
     } catch {
       entry.physics = undefined
       continue
@@ -676,12 +717,8 @@ app.whenReady().then(() => {
         }
         continue
       }
-      const bounds = entry.win.getBounds()
-      const left = bounds.x + MARGIN_SIDE - 8
-      const top = bounds.y + MARGIN_TOP - 8
-      const right = left + entry.size + 16
-      const bottom = top + entry.height + 16
-      const onPet = point.x >= left && point.x <= right && point.y >= top && point.y <= bottom
+      const hit = hitRect(entry)
+      const onPet = point.x >= hit.left && point.x <= hit.right && point.y >= hit.top && point.y <= hit.bottom
       if (onPet === entry.ignoring) {
         entry.ignoring = !onPet
         entry.win.setIgnoreMouseEvents(!onPet)

@@ -463,7 +463,7 @@ window.__ModuleLoader__.load({
         const throwPower = physics !== null && Number.isFinite(Number(physics.throwPower)) ? Number(physics.throwPower) : 1
         const power = clamp(speed / (1200 * Math.max(0.1, throwPower)), 0.05, 4)
         const angle = Math.atan2(-vy, vx) * 180 / Math.PI
-        void postJson(PET_BASE + '/throw?pet=' + encodeURIComponent(petId), { angle, power })
+        void postJson(PET_BASE + '/throw?pet=' + encodeURIComponent(petId) + '&surface=any', { angle, power })
       }
 
       const applyLocalHits = (hits) => {
@@ -1068,13 +1068,13 @@ window.__ModuleLoader__.load({
         const target = local.pets[0]
         if (target === undefined) return
         const entry = local.entries.get(target.assetRoot)
-        void postJson(PET_BASE + '/broadcast?pet=' + encodeURIComponent(target.id), {
+        void postJson(PET_BASE + '/broadcast?pet=' + encodeURIComponent(target.id) + '&surface=any', {
           text: t('waveText', { name: wave.fromName }),
         })
         const pool = animationPool(entry)
         const greeting = pickRandom(pool)
         if (greeting !== undefined) {
-          void postJson(PET_BASE + '/anim?pet=' + encodeURIComponent(target.id), { name: greeting })
+          void postJson(PET_BASE + '/anim?pet=' + encodeURIComponent(target.id) + '&surface=any', { name: greeting })
         }
       }, [incomingSeq, data, pushToast, t, local])
 
@@ -1094,7 +1094,7 @@ window.__ModuleLoader__.load({
         pushToast(t('pokeIn', { name: poke.fromName }))
         const target = local.pets.find((pet) => pet.id === poke.petId) ?? local.pets[0]
         if (target === undefined) return
-        void postJson(PET_BASE + '/broadcast?pet=' + encodeURIComponent(target.id), {
+        void postJson(PET_BASE + '/broadcast?pet=' + encodeURIComponent(target.id) + '&surface=any', {
           text: t('pokeText', { name: poke.fromName }),
         })
       }, [incomingPokeSeq, data, pushToast, t, local])
