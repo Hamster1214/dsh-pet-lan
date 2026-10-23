@@ -55,6 +55,10 @@ window.__ModuleLoader__.load({
       desktopOff: '桌面窗口未启动',
       port: 'UDP 端口',
       portHint: '两台电脑必须一致（默认 41234）。改了会立刻重新监听。',
+      shareBubbles: '广播气泡文字',
+      shareBubblesHint: '同一局域网的人能看到桌宠气泡里的文字（可能包含对话内容）；关闭后只同步动作、表情和位置。',
+      acceptWaves: '接受打招呼',
+      acceptWavesHint: '允许别人让你的桌宠说一句短问候并播放打招呼动作。',
       save: '保存',
       saved: '已保存，联机立即生效。',
       saveFailed: '保存失败',
@@ -102,6 +106,10 @@ window.__ModuleLoader__.load({
       desktopOff: 'Desktop windows not running',
       port: 'UDP port',
       portHint: 'Must match on every machine (default 41234). Changing it rebinds immediately.',
+      shareBubbles: 'Broadcast bubble text',
+      shareBubblesHint: 'Peers on the LAN can read your pet bubble text (it may contain conversation snippets). Off = sync only animation, meme and position.',
+      acceptWaves: 'Accept waves',
+      acceptWavesHint: 'Let peers make your pet say a short greeting and play the wave animation.',
       save: 'Save',
       saved: 'Saved — LAN is live.',
       saveFailed: 'Save failed',
@@ -797,6 +805,8 @@ window.__ModuleLoader__.load({
           nickname: data.config.nickname !== undefined ? data.config.nickname : '',
           port: data.config.port,
           mode: data.config.mode !== undefined ? data.config.mode : 'desktop',
+          shareBubbles: data.config.shareBubbles !== false,
+          acceptWaves: data.config.acceptWaves !== false,
         })
       }, [data])
 
@@ -883,6 +893,32 @@ window.__ModuleLoader__.load({
             onChange: (event) => setForm((current) => ({ ...current, port: Number(event.target.value) })),
           }),
           h('span', { key: 'hint', className: 'dsh-pet-lan-muted dsh-pet-lan-small' }, t('portHint')),
+        ]),
+        h('div', { key: 'privacy', className: 'dsh-pet-lan-field' }, [
+          h('label', { key: 'shareBubbles', className: 'dsh-pet-lan-check' }, [
+            h('input', {
+              key: 'input',
+              type: 'checkbox',
+              checked: form !== null && form.shareBubbles === true,
+              disabled: form === null,
+              onChange: (event) => setForm((current) => ({ ...current, shareBubbles: event.target.checked })),
+            }),
+            h('span', { key: 'label' }, t('shareBubbles')),
+          ]),
+          h('span', { key: 'hint', className: 'dsh-pet-lan-muted dsh-pet-lan-small' }, t('shareBubblesHint')),
+        ]),
+        h('div', { key: 'waves', className: 'dsh-pet-lan-field' }, [
+          h('label', { key: 'acceptWaves', className: 'dsh-pet-lan-check' }, [
+            h('input', {
+              key: 'input',
+              type: 'checkbox',
+              checked: form !== null && form.acceptWaves === true,
+              disabled: form === null,
+              onChange: (event) => setForm((current) => ({ ...current, acceptWaves: event.target.checked })),
+            }),
+            h('span', { key: 'label' }, t('acceptWaves')),
+          ]),
+          h('span', { key: 'hint', className: 'dsh-pet-lan-muted dsh-pet-lan-small' }, t('acceptWavesHint')),
         ]),
         h('div', { key: 'actions', className: 'dsh-pet-lan-actions' }, [
           h('button', { key: 'save', type: 'button', className: 'dsh-pet-lan-button dsh-pet-lan-button-primary', onClick: () => void save() }, t('save')),

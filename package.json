@@ -1,7 +1,7 @@
 {
   "name": "dsh-pet-lan",
-  "version": "0.2.1",
-  "description": "LAN co-op for the dsh-pet desktop pet: every DSH on the same network shows the other users' pets. Requires dsh-pet 0.3.7.",
+  "version": "0.3.0",
+  "description": "LAN co-op for the dsh-pet desktop pet: see peers on the same network, wave, and drag their desktop windows. Requires dsh-pet 0.3.7. An optional included patch enables live animation, bubble and meme sync.",
   "type": "module",
   "main": "lib/index.js",
   "icon": "icon.svg",
@@ -15,14 +15,13 @@
     "lib/index.js",
     "client.js",
     "runtime/desktop-helper",
-    "scripts/install.mjs",
     "scripts/patch-dsh-pet.mjs",
-    "AI-INSTALL.md",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "dsh": {
     "bundle": {
@@ -42,7 +41,7 @@
     }
   },
   "license": "MIT",
-  "author": "dsh-pet-lan contributors",
+  "author": "Hamster1214",
   "keywords": [
     "dsh",
     "dsh-plugin",
