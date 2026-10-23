@@ -1,6 +1,6 @@
 {
   "name": "dsh-pet-lan",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "LAN co-op for the dsh-pet desktop pet: see peers, click for the dsh-whale-widget duck sound, throw with bounce, and collide with local/remote pets. Requires dsh-pet 0.3.7. An optional included patch enables live animation, bubble and meme sync.",
   "type": "module",
   "main": "lib/index.js",

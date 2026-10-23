@@ -331,7 +331,7 @@ function startStdin() {  // Electron's main process cannot read a piped stdin on
     } catch {
       // A half-written file is retried on the next tick.
     }
-  }, 300).unref?.()
+  }, 150).unref?.()
 
   if (hostPid > 0) {
     setInterval(() => {

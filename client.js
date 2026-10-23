@@ -556,8 +556,10 @@ window.__ModuleLoader__.load({
           if (document.visibilityState === 'visible') void tick()
         }, 2000)
         poseTimer = window.setInterval(() => {
-          if (document.visibilityState === 'visible') void reportPoses()
-        }, 500)
+          // Pose reporting must not stop just because the overlay returns null
+          // in desktop mode or the DSH page is covered by the pet windows.
+          void reportPoses()
+        }, 200)
         document.addEventListener('visibilitychange', onVisibility)
       }
 
@@ -596,6 +598,10 @@ window.__ModuleLoader__.load({
     }
 
     const store = createLanStore()
+    // Keep the polling store alive independently of the overlay/settings pages:
+    // in desktop mode the overlay returns null, and React may unmount it while
+    // the local pose still has to be reported for collisions.
+    const releaseStore = store.subscribe(() => {})
 
     /** Viewport size, refreshed on resize (remote positions are relative). */
     function useViewport() {
@@ -1490,6 +1496,7 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const disposeStyles = installStyles()
         ctx.effect(() => () => disposeStyles(), 'dsh-pet-lan: styles')
+        ctx.effect(() => releaseStore, 'dsh-pet-lan: polling keepalive')
 
         // Locale is optional: without it the UI falls back to the browser's
         // language (zh/en), never to raw keys.
