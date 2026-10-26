@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('petLan', {
   ready() {
     ipcRenderer.send('pet-lan-ready')
   },
+  onLand(callback) { ipcRenderer.on('pet-lan-land', (_event, payload) => callback(payload)) },
   onState(callback) {
     ipcRenderer.on('pet-lan-state', (_event, state) => callback(state))
   },

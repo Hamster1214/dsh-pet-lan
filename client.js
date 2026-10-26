@@ -73,7 +73,11 @@ window.__ModuleLoader__.load({
       acceptWaves: '接受打招呼',
       acceptWavesHint: '允许别人让你的桌宠说一句短问候并播放打招呼动作。',
       petCollision: '桌宠碰撞',
-      petCollisionHint: '桌面窗口：远端桌宠之间、以及和本机 dsh-pet 之间会互相弹开；关闭后只保留抛掷/反弹。',
+      petCollisionHint: '开启并连接后，由桌宠联机统一处理本机与远端副本的碰撞，自动暂停 dsh-pet 原生碰撞；关闭、退出或断线后恢复原设置。修改后请保存。',
+      collisionActive: '联机碰撞已接管 · dsh-pet 原生碰撞已暂停',
+      collisionWaiting: '联机碰撞尚未生效：请安装 dsh-pet 0.3.8 物理桥接补丁并重启桌宠。原生碰撞保持原设置。',
+      collisionOff: '联机碰撞未接管 · dsh-pet 使用原生碰撞设置',
+      collisionBrowser: '浏览器模式不支持统一碰撞；请选择桌面模式。',
       save: '保存',
       saved: '已保存，联机立即生效。',
       saveFailed: '保存失败',
@@ -130,7 +134,11 @@ window.__ModuleLoader__.load({
       acceptWaves: 'Accept waves',
       acceptWavesHint: 'Let peers make your pet say a short greeting and play the wave animation.',
       petCollision: 'Pet collision',
-      petCollisionHint: 'Desktop windows: remote pets bounce off each other and off your local dsh-pet. Off = throws/bounces only.',
+      petCollisionHint: 'When connected, LAN takes over local and remote-copy collisions and automatically pauses native dsh-pet collisions. Turning it off, exiting or disconnecting restores the original setting. Save to apply.',
+      collisionActive: 'LAN collision active · native dsh-pet collision paused',
+      collisionWaiting: 'Collision is not active. Install the dsh-pet 0.3.8 physics adapter and restart the pet. Native settings remain effective.',
+      collisionOff: 'LAN collision inactive · native collision settings apply',
+      collisionBrowser: 'Unified collision requires desktop mode.',
       save: 'Save',
       saved: 'Saved — LAN is live.',
       saveFailed: 'Save failed',
@@ -426,10 +434,7 @@ window.__ModuleLoader__.load({
       let state = { data: null, error: null }
       const listeners = new Set()
       let timer = null
-      let poseTimer = null
       let inflight = false
-      let lastLocalHitSeq = 0
-      let localHitInitialized = false
 
       const publish = (next) => {
         state = next
@@ -448,74 +453,8 @@ window.__ModuleLoader__.load({
           pets: pets.map((pet) => (live[pet.id] === undefined ? pet : { ...pet, live: live[pet.id] })),
           viewport: { w: window.innerWidth, h: window.innerHeight },
           physics: merged.physics,
+          confineToScreen: merged.confineToScreen === true,
         })
-        applyLocalHits(result.localHits)
-      }
-
-      const throwLocal = (hit) => {
-        const petId = typeof hit.petId === 'string' ? hit.petId : ''
-        const vx = Number(hit.vx)
-        const vy = Number(hit.vy)
-        if (petId === '' || !Number.isFinite(vx) || !Number.isFinite(vy)) return
-        const speed = Math.hypot(vx, vy)
-        if (speed < 20) return
-        const physics = localConfig !== null && localConfig.physics !== undefined ? localConfig.physics : null
-        const throwPower = physics !== null && Number.isFinite(Number(physics.throwPower)) ? Number(physics.throwPower) : 1
-        const power = clamp(speed / (1200 * Math.max(0.1, throwPower)), 0.05, 4)
-        const angle = Math.atan2(-vy, vx) * 180 / Math.PI
-        void postJson(PET_BASE + '/throw?pet=' + encodeURIComponent(petId) + '&surface=any', { angle, power })
-      }
-
-      const applyLocalHits = (hits) => {
-        if (!Array.isArray(hits)) return
-        if (!localHitInitialized) {
-          localHitInitialized = true
-          for (const hit of hits) {
-            const seq = Number(hit.seq)
-            if (Number.isFinite(seq) && seq > lastLocalHitSeq) lastLocalHitSeq = seq
-          }
-          return
-        }
-        for (const hit of hits) {
-          const seq = Number(hit.seq)
-          if (!Number.isFinite(seq) || seq <= lastLocalHitSeq) continue
-          lastLocalHitSeq = seq
-          throwLocal(hit)
-        }
-      }
-
-      /** Poll dsh-pet's /pose for the local desktop pet body (collision). */
-      const reportPoses = async () => {
-        if (localConfig === null) return
-        const merged = localConfig
-        const { pets } = flattenPets(merged)
-        if (pets.length === 0) return
-        const bodies = []
-        for (const pet of pets.slice(0, 5)) {
-          try {
-            const response = await fetch(PET_BASE + '/pose?pet=' + encodeURIComponent(pet.id), {
-              credentials: 'same-origin',
-              cache: 'no-store',
-            })
-            if (!response.ok) continue
-            const pose = await response.json()
-            if (pose === null || pose.ok !== true) continue
-            const nx = Number(pose.x)
-            const ny = Number(pose.y)
-            if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx < 0 || nx > 1 || ny < 0 || ny > 1) continue
-            // Normalized center: the desktop helper maps it against the real
-            // multi-monitor work-area hull (the browser only knows one screen).
-            bodies.push({ id: pet.id, size: pet.size, nx, ny })
-          } catch {
-            // The local pet may not be in desktop mode; collision is optional.
-          }
-        }
-        const result = await postJson('/api/pet-lan/local', {
-          bodies,
-          physics: merged.physics,
-          viewport: { w: window.innerWidth, h: window.innerHeight },
-        })
-        applyLocalHits(result.localHits)
       }
 
       const tick = async () => {
@@ -531,7 +470,6 @@ window.__ModuleLoader__.load({
           if (!response.ok) throw new Error('HTTP ' + response.status)
           const data = await response.json()
           publish({ data, error: null })
-          applyLocalHits(data.localHits)
         } catch (error) {
           publish({ data: state.data, error: String(error && error.message ? error.message : error) })
           // The pet config may be missing before dsh-pet mounts; keep retrying.
@@ -544,31 +482,22 @@ window.__ModuleLoader__.load({
       const onVisibility = () => {
         if (document.visibilityState === 'visible') {
           void tick()
-          void reportPoses()
         }
       }
 
       const start = () => {
         if (timer !== null) return
         void tick()
-        void reportPoses()
         timer = window.setInterval(() => {
           if (document.visibilityState === 'visible') void tick()
         }, 2000)
-        poseTimer = window.setInterval(() => {
-          // Pose reporting must not stop just because the overlay returns null
-          // in desktop mode or the DSH page is covered by the pet windows.
-          void reportPoses()
-        }, 200)
         document.addEventListener('visibilitychange', onVisibility)
       }
 
       const stop = () => {
         if (timer === null) return
         window.clearInterval(timer)
-        window.clearInterval(poseTimer)
         timer = null
-        poseTimer = null
         document.removeEventListener('visibilitychange', onVisibility)
       }
 
@@ -600,7 +529,7 @@ window.__ModuleLoader__.load({
     const store = createLanStore()
     // Keep the polling store alive independently of the overlay/settings pages:
     // in desktop mode the overlay returns null, and React may unmount it while
-    // the local pose still has to be reported for collisions.
+    // discovery and configuration must remain live in desktop mode.
     const releaseStore = store.subscribe(() => {})
 
     /** Viewport size, refreshed on resize (remote positions are relative). */
@@ -1351,6 +1280,9 @@ window.__ModuleLoader__.load({
             h('span', { key: 'label' }, t('petCollision')),
           ]),
           h('span', { key: 'hint', className: 'dsh-pet-lan-muted dsh-pet-lan-small' }, t('petCollisionHint')),
+          h('p', { key: 'owner', role: 'status', 'aria-live': 'polite', className: 'dsh-pet-lan-small' },
+            t(data.config.mode === 'browser' ? 'collisionBrowser' : data.collisionStatus?.active ? 'collisionActive'
+              : data.config.enabled && data.config.petCollision ? 'collisionWaiting' : 'collisionOff')),
         ]),
         h('div', { key: 'actions', className: 'dsh-pet-lan-actions' }, [
           h('button', { key: 'save', type: 'button', className: 'dsh-pet-lan-button dsh-pet-lan-button-primary', onClick: () => void save() }, t('save')),

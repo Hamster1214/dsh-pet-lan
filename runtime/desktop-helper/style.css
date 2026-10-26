@@ -161,3 +161,6 @@ body {
 .bubble-text {
   white-space: pre-wrap;
 }
+
+/* Same bottom-anchored landing squash as dsh-pet 0.3.8. */
+.stage { transform-origin: 50% 100%; }

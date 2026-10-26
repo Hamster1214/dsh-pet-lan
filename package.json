@@ -1,7 +1,7 @@
 {
   "name": "dsh-pet-lan",
   "version": "0.5.2",
-  "description": "LAN co-op for the dsh-pet desktop pet: see peers, click for the dsh-whale-widget duck sound, throw with bounce, and collide with local/remote pets. Requires dsh-pet 0.3.7. An optional included patch enables live animation, bubble and meme sync.",
+  "description": "LAN pets with dsh-pet 0.3.8 shared physics, real-time local collisions and exclusive collision ownership.",
   "type": "module",
   "main": "lib/index.js",
   "icon": "icon.svg",
@@ -23,7 +23,10 @@
     "LICENSE",
     "SECURITY.md",
     "assets/*.mp3",
-    "assets/NOTICE.md"
+    "assets/NOTICE.md",
+    "runtime/shared",
+    "scripts/patch-physics-038.mjs",
+    "COMPATIBILITY.md"
   ],
   "dsh": {
     "bundle": {
@@ -66,5 +69,9 @@
   "homepage": "https://github.com/Hamster1214/dsh-pet-lan#readme",
   "bugs": {
     "url": "https://github.com/Hamster1214/dsh-pet-lan/issues"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "patch:physics": "node scripts/patch-physics-038.mjs"
   }
 }

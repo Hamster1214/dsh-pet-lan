@@ -16,6 +16,9 @@ let dragStartY = 0
 let dragMoved = false
 let dragSamples = []
 let currentKey = ''
+let physics = PetShared.DEFAULT_PHYSICS
+let scale = 1
+let squashAnimation = null
 
 /** Exact duck sound from dsh-whale-widget (Ya1 = press, Ya2 = release). */
 const duckPressUrl = new URL('../../assets/duck-press.mp3', location.href).href
@@ -52,6 +55,9 @@ petEl.addEventListener('animationend', (event) => {
 })
 
 function applySize(state) {
+  physics = state.physics || physics
+  scale = state.scale || 1
+  document.getElementById('stage').style.transform = 'translateY(' + (state.bottomPad || 0) + 'px)'
   petEl.style.width = state.size + 'px'
   petEl.style.height = state.height + 'px'
   fallback.style.fontSize = Math.round(state.size * 0.26) + 'px'
@@ -112,6 +118,14 @@ function applyState(state) {
 }
 
 window.petLan.onState(applyState)
+window.petLan.onLand(({ squash }) => {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const stage = document.getElementById('stage')
+  squashAnimation?.cancel()
+  squashAnimation = stage.animate(Array.from({ length: 31 }, (_, i) => ({
+    scale: '1 ' + PetShared.squashScale(i / 30, squash), offset: i / 30,
+  })), { duration: PetShared.SQ_DURATION_MS })
+})
 
 /* Click = squash + squeak; drag = move the window; flick = throw with bounce.
    The renderer reports pointer screen positions; the main process moves the
@@ -141,7 +155,7 @@ window.addEventListener('pointermove', (event) => {
   if (Math.abs(dx) > 4 || Math.abs(dy) > 4) dragMoved = true
   const now = performance.now()
   dragSamples.push({ x: event.screenX, y: event.screenY, t: now })
-  if (dragSamples.length > 10) dragSamples.shift()
+  dragSamples = PetShared.trimTrail(dragSamples, now)
   window.petLan.dragMove(event.screenX, event.screenY)
 })
 
@@ -156,7 +170,6 @@ function endDrag(event, cancelled) {
   }
 
   const now = performance.now()
-  dragSamples.push({ x: event.screenX, y: event.screenY, t: now })
   if (!dragMoved) {
     squashPet()
     if (currentKey !== '') window.petLan.poke(currentKey)
@@ -164,13 +177,9 @@ function endDrag(event, cancelled) {
     return
   }
 
-  const recent = dragSamples.filter((sample) => now - sample.t <= 140)
-  const first = recent[0] ?? dragSamples[0]
-  const last = recent[recent.length - 1] ?? dragSamples[dragSamples.length - 1]
-  const dt = (last.t - first.t) / 1000
-  const vx = dt > 0 ? Math.max(-2500, Math.min(2500, (last.x - first.x) / dt)) : 0
-  const vy = dt > 0 ? Math.max(-2500, Math.min(2500, (last.y - first.y) / dt)) : 0
-  window.petLan.dragEnd({ vx, vy })
+  const velocity = PetShared.estimateReleaseVelocity(
+    dragSamples.map(sample => ({ ...sample, x: sample.x / scale, y: sample.y / scale })), now, physics)
+  window.petLan.dragEnd({ vx: (velocity?.vx || 0) * scale, vy: (velocity?.vy || 0) * scale })
 }
 
 window.addEventListener('pointerup', (event) => endDrag(event, false))
